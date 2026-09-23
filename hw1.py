@@ -53,34 +53,107 @@ def image_data_url(path: Path) -> str:
 
 
 def build_chain() -> Any:
-    """Create and return your LangChain chain once.
+    from langchain_core.prompts import ChatPromptTemplate
+    from langchain_deepseek import ChatDeepSeek
 
-    Suggested imports:
-        from langchain_core.prompts import ChatPromptTemplate
-        from langchain_deepseek import ChatDeepSeek
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "user",
+                [
+                    {
+                        "type": "text",
+                        "text": (
+                            "You are a pure OCR data extractor. DO NOT calculate anything. DO NOT output JSON.\n\n"
+                            
+                            "Step 1: Find the final net payment amount after rounding.\n"
+                            "Step 2: Extract EVERY original positive item price into a Markdown table.\n"
+                            "- List every item row by row. If an identical item appears 3 times, write 3 separate rows.\n"
+                            "- Do NOT include negative discounts, rounding, subtotals, cash, or change in the table.\n\n"
+                            
+                            "STRICT OUTPUT FORMAT:\n"
+                            "<thinking_process>\n"
+                            "Scan the receipt line by line to map names to their exact prices.\n"
+                            "</thinking_process>\n"
+                            "FINAL_PAYMENT: <amount>\n\n"
+                            "| Item Name | Price |\n"
+                            "|---|---|\n"
+                            "| Exact Name 1 | 24.90 |\n"
+                            "| Exact Name 2 | 12.00 |"
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "{image_url}"},
+                    },
+                ],
+            )
+        ]
+    )
 
-    Use the vision-capable DeepSeek Flash model named
-    ``deepseek-v4-flash-vision-exp``. The API key is loaded from .env.
-    """
-    ### YOUR CODE HERE
-    return None
+    model = ChatDeepSeek(
+        model="deepseek-v4-flash-vision-exp",
+        temperature=0.0,
+    )
+    return prompt | model
 
 
 def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
-    """Run your chain and return one response for each exact query string.
+    batch_inputs = [{"image_url": image_data_url(img_path)} for img_path in images]
+    results = chain.batch(batch_inputs,config={"max_concurrency": 2})
+    
+    total_spend = Decimal("0.00")
+    total_without_discount = Decimal("0.00")
+    
+    print("\n--- DEBUG LOG: Model Step-by-Step Outputs ---")
+    for img_path, res in zip(images, results):
+        text = response_text(res)
+        print(f"\n[{img_path.name} RAW OUTPUT]:\n{text}\n")
+        
+        fp = Decimal("0.00")
+        op = Decimal("0.00")
+        
+        # 1. 提取 Final Payment (Q1)
+        fp_match = re.search(r"FINAL_PAYMENT:\s*?\$?\s*?(-?\d+\.\d+)", text, re.IGNORECASE)
+        if fp_match:
+            fp = Decimal(fp_match.group(1))
+            
+        # 2. 提取 Markdown 表格中的正数 (Q2)
+        for line in text.splitlines():
+            # 识别 Markdown 表格行，排除表头和分割线
+            if line.strip().startswith("|") and "Price" not in line and "---" not in line:
+                # 分割表格列并清理空格
+                parts = [p.strip() for p in line.split("|") if p.strip()]
+                if len(parts) >= 2:
+                    price_str = parts[-1].replace(",", "")
+                    # 抓取包含可能的负号的数字
+                    amounts = re.findall(r"-?\d+\.\d+", price_str)
+                    if amounts:
+                        val = Decimal(amounts[-1])
+                        # 只有大于0的才累加，自带免疫负号折扣幻觉的能力
+                        if val > 0:
+                            op += val
+                            
+        # 备选提取逻辑：极端防御
+        if fp == Decimal("0.00") and op == Decimal("0.00"):
+            decimals = re.findall(r"-?\d+\.\d{2}", text)
+            if len(decimals) >= 2:
+                fp = Decimal(decimals[-2])
+                op = Decimal(decimals[-1])
+            elif len(decimals) == 1:
+                fp = Decimal(decimals[-1])
+                op = Decimal(decimals[-1])
+                
+        print(f"[{img_path.name} PARSED] -> Q1(Spent): {fp}, Q2(Without Discount): {op}")
+        total_spend += fp
+        total_without_discount += op
 
-    ``images`` contains every receipt in the selected folder. A valid return
-    value looks like:
+    print("--- DEBUG LOG END ---\n")
 
-        {QUERY_1: "HK$123.40", QUERY_2: "HK$150.00"}
-
-    Use the provided ``image_data_url(path)`` helper to put local images in
-    multimodal human messages. LangChain's ``batch`` method is one simple way
-    to process independent receipt-extraction prompts in parallel.
-    """
-    ### YOUR CODE HERE
-    _ = (chain, images)
-    return {QUERY_1: DUMMY_RESPONSE, QUERY_2: DUMMY_RESPONSE}
+    return {
+        QUERY_1: f"HK${total_spend:.2f}",
+        QUERY_2: f"HK${total_without_discount:.2f}",
+    }
 
 
 # Everything below is provided runner/scoring code. No edits are needed.
