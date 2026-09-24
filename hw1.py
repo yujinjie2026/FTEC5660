@@ -103,7 +103,6 @@ def build_chain() -> Any:
 def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
     batch_inputs = [{"image_url": image_data_url(img_path)} for img_path in images]
     
-    # 限制并发数为 2，防止触发 429 报错
     results = chain.batch(batch_inputs, config={"max_concurrency": 2})
     
     total_spend = Decimal("0.00")
@@ -117,12 +116,9 @@ def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
         fp = Decimal("0.00")
         op = Decimal("0.00")
         
-        # 1. 提取 Final Payment (Q1)
         fp_match = re.search(r"FINAL_PAYMENT:\s*?\$?\s*?(-?\d+\.\d+)", text, re.IGNORECASE)
         if fp_match:
             fp = Decimal(fp_match.group(1))
-            
-        # 2. 提取 Markdown 表格中的正数 (Q2)
         for line in text.splitlines():
             if line.strip().startswith("|") and "Price" not in line and "---" not in line:
                 parts = [p.strip() for p in line.split("|") if p.strip()]
@@ -134,7 +130,6 @@ def answer_queries(chain: Any, images: list[Path]) -> dict[str, Any]:
                         if val > 0:
                             op += val
                             
-        # 备选提取逻辑：极端防御
         if fp == Decimal("0.00") and op == Decimal("0.00"):
             decimals = re.findall(r"-?\d+\.\d{2}", text)
             if len(decimals) >= 2:
