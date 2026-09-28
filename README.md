@@ -48,6 +48,19 @@ DeepSeek Flash model. JPEG, PNG, GIF, and WebP inputs are accepted by the
 homework runner.
 
 
-## Homework 1 solution: 
-> to students: please fill your solution description here.
+## Homework 1 solution:
 
+This solution assigns distinct roles to the two functions to prevent the model's calculation errors and transcription misalignments. The `build_chain` function is responsible for the line-by-line receipt transcription to prevent miscalculating item prices. In the prompt design, the model is instructed to locate the final payment line and extract all printed item prices into a standard Markdown table. Afterward, all arithmetic operations are delegated to the `answer_queries` function, which calculates the final amounts by parsing the table and automatically skipping negative discounts and subtotal lines.
+
+### Chain Architecture Visualization
+
+```mermaid
+flowchart LR
+    A[Receipt Images] --> B[build_chain]
+    A --> C[answer_queries]
+    
+    B -->|Prompt Design| D[Transcription and Markdown Table]
+    C -->|Math Operations| E[Parse Table and Skip Discounts]
+    
+    D --> F[get results]
+    E --> F
